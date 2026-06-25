@@ -32,4 +32,4 @@ run:
 
 test:
 	@make up
-	docker-compose exec workspace pytest -v
+	docker-compose exec workspace python -m pytest -v
