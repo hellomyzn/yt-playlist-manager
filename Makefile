@@ -27,6 +27,8 @@ auth:
 	docker-compose exec workspace bash -c "python main.py --auth-only"
 
 run:
+	vi src/input/add.txt
+	vi src/input/remove.txt
 	@make up
 	docker-compose exec workspace bash -c "python main.py"
 
