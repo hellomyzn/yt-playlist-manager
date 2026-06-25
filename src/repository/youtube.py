@@ -42,6 +42,22 @@ def fetch_playlists(youtube) -> list[dict]:
     ]
 
 
+def fetch_playlist_video_ids(youtube, playlist_id: str) -> set[str]:
+    ids: set[str] = set()
+    next_token = None
+    while True:
+        kwargs: dict = dict(part="snippet", playlistId=playlist_id, maxResults=50)
+        if next_token:
+            kwargs["pageToken"] = next_token
+        res = youtube.playlistItems().list(**kwargs).execute()
+        for item in res.get("items", []):
+            ids.add(item["snippet"]["resourceId"]["videoId"])
+        next_token = res.get("nextPageToken")
+        if not next_token:
+            break
+    return ids
+
+
 def api_call_with_retry(fn):
     while True:
         try:
