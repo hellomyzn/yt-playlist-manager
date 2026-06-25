@@ -44,7 +44,8 @@ class TestProcessAdd:
     def test_all_success(self, yt, playlist, add_file, tmp_path):
         yt.playlistItems().insert().execute.return_value = {}
         csv_path = tmp_path / "history.csv"
-        with patch("service.sync.time.sleep"):
+        with patch("service.sync.time.sleep"), \
+             patch("service.sync.fetch_playlist_video_ids", return_value=set()):
             result = process_add(yt, playlist, [], add_file, csv_path)
         assert result.ok == 2
         assert result.confirmed_skip == 0
@@ -63,38 +64,59 @@ class TestProcessAdd:
         result = process_add(yt, playlist, [], tmp_path / "add.txt", csv_path)
         assert result.ok == 0
 
-    def test_409_collected_as_already_in_playlist(self, yt, playlist, add_file, tmp_path):
-        yt.playlistItems().insert().execute.side_effect = make_http_error(409)
+    def test_existing_in_playlist_auto_skipped(self, yt, playlist, add_file, tmp_path):
+        # ① プレイリスト既存 → 自動スキップ（確認なし）
         csv_path = tmp_path / "history.csv"
-        with patch("service.sync.time.sleep"):
+        with patch("service.sync.time.sleep"), \
+             patch("service.sync.fetch_playlist_video_ids",
+                   return_value={"AAAAAAAAAAa", "BBBBBBBBBBb"}):
             result = process_add(yt, playlist, [], add_file, csv_path)
         assert result.ok == 0
         assert len(result.already_in_playlist) == 2
+        assert result.confirmed_skip == 0
+        yt.playlistItems().insert.assert_not_called()
 
-    def test_previously_added_user_confirms(self, yt, playlist, add_file, tmp_path):
+    def test_csv_existing_user_confirms(self, yt, playlist, add_file, tmp_path):
+        # ① プレイリスト既存なし ② CSV既存 → ユーザーが Yes → 追加される
         history = [{"video_id": "AAAAAAAAAAa", "playlist_id": "PL1", "action": "add"}]
         yt.playlistItems().insert().execute.return_value = {}
         csv_path = tmp_path / "history.csv"
-        with patch("service.sync.time.sleep"), patch("service.sync.questionary.confirm") as mock_q:
+        with patch("service.sync.time.sleep"), \
+             patch("service.sync.fetch_playlist_video_ids", return_value=set()), \
+             patch("service.sync.questionary.confirm") as mock_q:
             mock_q.return_value.ask.return_value = True
             result = process_add(yt, playlist, history, add_file, csv_path)
         assert result.ok == 2
         assert result.confirmed_skip == 0
 
-    def test_previously_added_user_declines(self, yt, playlist, add_file, tmp_path):
+    def test_csv_existing_user_declines(self, yt, playlist, add_file, tmp_path):
+        # ① プレイリスト既存なし ② CSV既存 → ユーザーが No → スキップ
         history = [{"video_id": "AAAAAAAAAAa", "playlist_id": "PL1", "action": "add"}]
         yt.playlistItems().insert().execute.return_value = {}
         csv_path = tmp_path / "history.csv"
-        with patch("service.sync.time.sleep"), patch("service.sync.questionary.confirm") as mock_q:
+        with patch("service.sync.time.sleep"), \
+             patch("service.sync.fetch_playlist_video_ids", return_value=set()), \
+             patch("service.sync.questionary.confirm") as mock_q:
             mock_q.return_value.ask.return_value = False
             result = process_add(yt, playlist, history, add_file, csv_path)
         assert result.confirmed_skip == 1
         assert result.ok == 1
 
+    def test_409_fallback_collected(self, yt, playlist, add_file, tmp_path):
+        # 事前チェックをすり抜けて409（競合フォールバック）
+        yt.playlistItems().insert().execute.side_effect = make_http_error(409)
+        csv_path = tmp_path / "history.csv"
+        with patch("service.sync.time.sleep"), \
+             patch("service.sync.fetch_playlist_video_ids", return_value=set()):
+            result = process_add(yt, playlist, [], add_file, csv_path)
+        assert result.ok == 0
+        assert len(result.already_in_playlist) == 2
+
     def test_api_error_collected(self, yt, playlist, add_file, tmp_path):
         yt.playlistItems().insert().execute.side_effect = make_http_error(500)
         csv_path = tmp_path / "history.csv"
-        with patch("service.sync.time.sleep"):
+        with patch("service.sync.time.sleep"), \
+             patch("service.sync.fetch_playlist_video_ids", return_value=set()):
             result = process_add(yt, playlist, [], add_file, csv_path)
         assert result.ok == 0
         assert len(result.api_errors) == 2

@@ -8,7 +8,7 @@ from googleapiclient.errors import HttpError
 from domain.models import AddResult, ParseResult, RemoveResult
 from domain.parser import parse_input
 from repository.history import append_history, was_previously_added
-from repository.youtube import api_add_video, api_remove_video
+from repository.youtube import api_add_video, api_remove_video, fetch_playlist_video_ids
 
 
 def _interval() -> float:
@@ -21,8 +21,16 @@ def process_add(youtube, playlist: dict, history: list[dict], add_file: Path, cs
         print("[INFO] add.txt なし/空 → スキップ")
         return result
 
+    existing_ids = fetch_playlist_video_ids(youtube, playlist["id"])
     parsed = parse_input(add_file)
     for video_id, title, url in parsed.items:
+        # ① プレイリスト既存 → 自動スキップ
+        if video_id in existing_ids:
+            result.already_in_playlist.append((video_id, title))
+            print(f"[SKIP] プレイリスト既存: {title or video_id}")
+            continue
+
+        # ② CSV履歴に既存 → ユーザー確認
         if was_previously_added(video_id, history, playlist["id"]):
             answer = questionary.confirm(
                 f"「{title or video_id}」は過去に同プレイリストへ追加済みです。再追加しますか？"
