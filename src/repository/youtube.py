@@ -22,7 +22,13 @@ def build_youtube_client(credentials_path: Path, token_path: Path):
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), SCOPES)
-            creds = flow.run_console()
+            # Docker環境向け手動フロー（ブラウザ不要）
+            flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+            auth_url, _ = flow.authorization_url(prompt="consent")
+            print(f"\n以下のURLをブラウザで開いてください:\n\n  {auth_url}\n")
+            code = input("表示された認証コードを貼り付けてください: ").strip()
+            flow.fetch_token(code=code)
+            creds = flow.credentials
         token_path.write_text(creds.to_json(), encoding="utf-8")
 
     return build("youtube", "v3", credentials=creds)
