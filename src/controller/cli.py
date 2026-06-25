@@ -13,8 +13,7 @@ from service.sync import print_summary, process_add, process_remove
 
 BASE_DIR = Path(__file__).parent.parent
 INPUT_DIR = BASE_DIR / "input"
-DATA_DIR = Path("/data/youtube")
-CSV_PATH = DATA_DIR / "playlist_history.csv"
+CSV_PATH = Path("/data/youtube/playlist_history.csv")
 CONFIG_PATH = BASE_DIR / "config.json"
 CREDENTIALS_PATH = BASE_DIR / "client_secret.json"
 TOKEN_PATH = BASE_DIR / "token.json"
