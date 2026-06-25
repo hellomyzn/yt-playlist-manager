@@ -5,7 +5,7 @@ from pathlib import Path
 import questionary
 from googleapiclient.errors import HttpError
 
-from domain.models import AddResult, RemoveResult
+from domain.models import AddResult, ParseResult, RemoveResult
 from domain.parser import parse_input
 from repository.history import append_history, was_previously_added
 from repository.youtube import api_add_video, api_remove_video
@@ -68,3 +68,50 @@ def process_remove(youtube, playlist: dict, remove_file: Path, csv_path: Path) -
             print(f"[ERROR] 削除失敗 {video_id}: {e}")
 
     return result
+
+
+def print_summary(
+    parse_add: ParseResult,
+    parse_remove: ParseResult,
+    add_result: AddResult,
+    remove_result: RemoveResult,
+) -> None:
+    sep = "=" * 50
+    print(f"\n{sep}")
+    print("処理完了サマリー")
+    print(sep)
+    print(f"追加成功: {add_result.ok} 件")
+    print(f"削除成功: {remove_result.ok} 件")
+
+    warnings: list[tuple[str, list[str]]] = []
+
+    all_invalid = parse_add.invalid_lines + parse_remove.invalid_lines
+    if all_invalid:
+        warnings.append(("無効URL（スキップ）", all_invalid))
+
+    all_dups = parse_add.duplicate_ids + parse_remove.duplicate_ids
+    if all_dups:
+        warnings.append(("重複video_id（先勝ちで1件のみ処理）", all_dups))
+
+    if add_result.confirmed_skip:
+        warnings.append(("再追加スキップ（ユーザー選択）", [f"{add_result.confirmed_skip} 件"]))
+
+    if add_result.already_in_playlist:
+        warnings.append(("プレイリスト既存（409）", [t or v for v, t in add_result.already_in_playlist]))
+
+    if remove_result.not_found:
+        warnings.append(("削除対象なし（プレイリストに不在）", [t or v for v, t in remove_result.not_found]))
+
+    all_errors = add_result.api_errors + remove_result.api_errors
+    if all_errors:
+        warnings.append(("APIエラー", [f"{t or v}: {e}" for v, t, e in all_errors]))
+
+    if warnings:
+        print("\n⚠️  注意事項")
+        print("-" * 40)
+        for label, items in warnings:
+            print(f"\n▶ {label}")
+            for item in items:
+                print(f"  • {item}")
+
+    print(f"\n{sep}")
