@@ -1,6 +1,7 @@
 import pytest
 from pathlib import Path
-from main import parse_input, ParseResult
+from domain.parser import parse_input
+from domain.models import ParseResult
 
 
 class TestParseInput:

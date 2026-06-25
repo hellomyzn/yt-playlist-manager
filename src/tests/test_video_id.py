@@ -1,5 +1,5 @@
 import pytest
-from main import extract_video_id
+from domain.parser import extract_video_id
 
 
 class TestExtractVideoId:
