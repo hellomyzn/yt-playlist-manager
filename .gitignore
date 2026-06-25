@@ -1,0 +1,28 @@
+# 環境ファイル
+.env
+*.DS_Store
+*poetry.lock
+*.bash_history
+
+# Python
+.pytest_cache
+__pycache__/
+*.pyc
+
+docs/sphinx/resources
+docs/sphinx/build
+
+/src/src/**
+!/src/src/**/
+!/src/src/**/.gitkeep
+src/common/config/config.ini
+src/common/config/config.dev.ini
+
+.devcontainer/infra/docker/ssh-stub/ssh/id*
+
+# Footprints
+src/token.json
+src/client_secret.json
+src/playlist_history.csv
+src/config.json
+src/input/*.txt

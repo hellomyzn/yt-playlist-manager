@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "footprints"
+version = "0.1.0"
+description = "YouTube Playlist Sync Tool"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+google-api-python-client = "^2.131.0"
+google-auth-httplib2 = "^0.2.0"
+google-auth-oauthlib = "^1.2.0"
+questionary = "^2.0.1"
+tenacity = "^9.0.0"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.2"
+pytest-cov = "^4.1.0"
+pytest-mock = "^3.14.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
