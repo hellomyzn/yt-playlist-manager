@@ -24,6 +24,9 @@ services:
       - type: bind
         source: ${PROJECT_DIR-./src}/
         target: ${WORKDIR-/opt/work}
+      - type: bind
+        source: ../../footprints/youtube
+        target: /data/youtube
     networks:
       - internal_network
 
