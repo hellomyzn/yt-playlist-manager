@@ -1,4 +1,6 @@
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from googleapiclient.errors import HttpError
 
@@ -59,6 +61,20 @@ def fetch_playlist_video_ids(youtube, playlist_id: str) -> set[str]:
         if not next_token:
             break
     return ids
+
+
+def quota_reset_message() -> str:
+    pacific = ZoneInfo("America/Los_Angeles")
+    now_pt = datetime.now(pacific)
+    next_reset = (now_pt + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    delta = next_reset - now_pt
+    hours, rem = divmod(int(delta.total_seconds()), 3600)
+    minutes = rem // 60
+    return (
+        f"[ERROR] YouTube API の1日のクォータ上限（10,000ユニット）に達しました。\n"
+        f"クォータは太平洋時間の午前0時にリセットされます。\n"
+        f"約 {hours}時間{minutes}分後（PT {next_reset.strftime('%H:%M')}）に再実行してください。"
+    )
 
 
 def api_call_with_retry(fn):

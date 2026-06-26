@@ -1,7 +1,8 @@
 import pytest
+from freezegun import freeze_time
 from unittest.mock import MagicMock, patch
 from googleapiclient.errors import HttpError
-from repository.youtube import QuotaExceededError, api_call_with_retry, api_add_video, api_remove_video, fetch_playlist_video_ids
+from repository.youtube import QuotaExceededError, api_call_with_retry, api_add_video, api_remove_video, fetch_playlist_video_ids, quota_reset_message
 
 
 def make_http_error(status: int, reason: str = "") -> HttpError:
@@ -36,6 +37,20 @@ class TestApiCallWithRetry:
         fn = MagicMock(side_effect=make_http_error(500))
         with pytest.raises(HttpError):
             api_call_with_retry(fn)
+
+
+class TestQuotaResetMessage:
+    def test_returns_string_containing_key_phrases(self):
+        msg = quota_reset_message()
+        assert isinstance(msg, str)
+        assert "クォータ" in msg
+        assert "太平洋時間" in msg
+
+    @freeze_time("2026-06-26T10:00:00+00:00")
+    def test_returns_correct_remaining_hours(self):
+        # PT = UTC-7 (PDT): 10:00 UTC = 03:00 PDT → 次の PT 0:00 まで 21 時間
+        msg = quota_reset_message()
+        assert "21時間" in msg
 
 
 class TestFetchPlaylistVideoIds:
