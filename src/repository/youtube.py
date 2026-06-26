@@ -1,10 +1,13 @@
-import time
 from pathlib import Path
 
 from googleapiclient.errors import HttpError
 
-QUOTA_WAIT = 60
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
+
+
+class QuotaExceededError(Exception):
+    """YouTube API の日次クォータ超過時に raise する。"""
+    pass
 
 
 def build_youtube_client(credentials_path: Path, token_path: Path):
@@ -59,15 +62,12 @@ def fetch_playlist_video_ids(youtube, playlist_id: str) -> set[str]:
 
 
 def api_call_with_retry(fn):
-    while True:
-        try:
-            return fn()
-        except HttpError as e:
-            if e.resp.status == 403 and b"quotaExceeded" in e.content:
-                print(f"[WARN] Quota超過。{QUOTA_WAIT}秒後に再試行... (Ctrl+C で中断)")
-                time.sleep(QUOTA_WAIT)
-            else:
-                raise
+    try:
+        return fn()
+    except HttpError as e:
+        if e.resp.status == 403 and b"quotaExceeded" in e.content:
+            raise QuotaExceededError()
+        raise
 
 
 def api_add_video(youtube, playlist_id: str, video_id: str) -> bool:
