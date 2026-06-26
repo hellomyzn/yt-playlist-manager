@@ -80,7 +80,11 @@ def main(
     init_csv(csv_path)
     history = load_history(csv_path)
 
-    add_pl, remove_pl = choose_playlists(youtube, config_path)
+    try:
+        add_pl, remove_pl = choose_playlists(youtube, config_path)
+    except QuotaExceededError:
+        print(quota_reset_message())
+        sys.exit(1)
 
     print(f"\n追加先    : {add_pl['title']}")
     print(f"削除対象  : {remove_pl['title']}\n")

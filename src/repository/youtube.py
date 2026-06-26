@@ -40,7 +40,7 @@ def build_youtube_client(credentials_path: Path, token_path: Path):
 
 
 def fetch_playlists(youtube) -> list[dict]:
-    res = youtube.playlists().list(part="snippet", mine=True, maxResults=50).execute()
+    res = api_call_with_retry(lambda: youtube.playlists().list(part="snippet", mine=True, maxResults=50).execute())
     return [
         {"id": item["id"], "title": item["snippet"]["title"]}
         for item in res.get("items", [])
