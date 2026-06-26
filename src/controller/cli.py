@@ -8,12 +8,13 @@ from domain.models import ParseResult
 from domain.parser import parse_input
 from repository.config import load_config, save_config
 from repository.history import init_csv, load_history
-from repository.youtube import build_youtube_client, fetch_playlists
+from repository.youtube import QuotaExceededError, build_youtube_client, fetch_playlists, quota_reset_message
 from service.sync import print_summary, process_add, process_remove
 
 BASE_DIR = Path(__file__).parent.parent
 INPUT_DIR = BASE_DIR / "input"
-CSV_PATH = Path("/data/youtube/playlist_history.csv")
+CACHE_DIR = Path("/data/youtube")
+CSV_PATH = CACHE_DIR / "playlist_history.csv"
 CONFIG_PATH = BASE_DIR / "config.json"
 CREDENTIALS_PATH = BASE_DIR / "client_secret.json"
 TOKEN_PATH = BASE_DIR / "token.json"
@@ -92,7 +93,11 @@ def main(
     parse_add = _safe_parse(add_file)
     parse_remove = _safe_parse(remove_file)
 
-    add_result = process_add(youtube, add_pl, history, add_file, csv_path)
-    remove_result = process_remove(youtube, remove_pl, remove_file, csv_path)
+    try:
+        add_result = process_add(youtube, add_pl, history, add_file, csv_path, CACHE_DIR)
+        remove_result = process_remove(youtube, remove_pl, remove_file, csv_path, CACHE_DIR)
+    except QuotaExceededError:
+        print(quota_reset_message())
+        sys.exit(1)
 
     print_summary(parse_add, parse_remove, add_result, remove_result)
