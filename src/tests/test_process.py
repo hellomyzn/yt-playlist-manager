@@ -1,8 +1,11 @@
+import json
 import pytest
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
 from googleapiclient.errors import HttpError
 from domain.models import AddResult, RemoveResult
+from repository.youtube import QuotaExceededError
 from service.sync import process_add, process_remove
 
 
@@ -11,6 +14,14 @@ def make_http_error(status: int, reason: str = "") -> HttpError:
     resp.status = status
     content = f'{{"error":{{"errors":[{{"reason":"{reason}"}}]}}}}'.encode()
     return HttpError(resp=resp, content=content)
+
+
+def write_cache(cache_dir: Path, playlist_id: str, video_ids: list[str]) -> None:
+    path = cache_dir / f"playlist_cache_{playlist_id}.json"
+    path.write_text(json.dumps({
+        "fetched_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        "video_ids": video_ids,
+    }))
 
 
 @pytest.fixture
@@ -46,7 +57,7 @@ class TestProcessAdd:
         csv_path = tmp_path / "history.csv"
         with patch("service.sync.time.sleep"), \
              patch("service.sync.fetch_playlist_video_ids", return_value=set()):
-            result = process_add(yt, playlist, [], add_file, csv_path)
+            result = process_add(yt, playlist, [], add_file, csv_path, tmp_path)
         assert result.ok == 2
         assert result.confirmed_skip == 0
         assert result.already_in_playlist == []
@@ -56,28 +67,26 @@ class TestProcessAdd:
         f = tmp_path / "add.txt"
         f.write_text("")
         csv_path = tmp_path / "history.csv"
-        result = process_add(yt, playlist, [], f, csv_path)
+        result = process_add(yt, playlist, [], f, csv_path, tmp_path)
         assert result.ok == 0
 
     def test_file_not_found(self, yt, playlist, tmp_path):
         csv_path = tmp_path / "history.csv"
-        result = process_add(yt, playlist, [], tmp_path / "add.txt", csv_path)
+        result = process_add(yt, playlist, [], tmp_path / "add.txt", csv_path, tmp_path)
         assert result.ok == 0
 
     def test_existing_in_playlist_auto_skipped(self, yt, playlist, add_file, tmp_path):
-        # ① プレイリスト既存 → 自動スキップ（確認なし）
         csv_path = tmp_path / "history.csv"
         with patch("service.sync.time.sleep"), \
              patch("service.sync.fetch_playlist_video_ids",
                    return_value={"AAAAAAAAAAa", "BBBBBBBBBBb"}):
-            result = process_add(yt, playlist, [], add_file, csv_path)
+            result = process_add(yt, playlist, [], add_file, csv_path, tmp_path)
         assert result.ok == 0
         assert len(result.already_in_playlist) == 2
         assert result.confirmed_skip == 0
         yt.playlistItems().insert.assert_not_called()
 
     def test_csv_existing_user_confirms(self, yt, playlist, add_file, tmp_path):
-        # ① プレイリスト既存なし ② CSV既存 → ユーザーが Yes → 追加される
         history = [{"video_id": "AAAAAAAAAAa", "playlist_id": "PL1", "action": "add"}]
         yt.playlistItems().insert().execute.return_value = {}
         csv_path = tmp_path / "history.csv"
@@ -85,12 +94,11 @@ class TestProcessAdd:
              patch("service.sync.fetch_playlist_video_ids", return_value=set()), \
              patch("service.sync.questionary.confirm") as mock_q:
             mock_q.return_value.ask.return_value = True
-            result = process_add(yt, playlist, history, add_file, csv_path)
+            result = process_add(yt, playlist, history, add_file, csv_path, tmp_path)
         assert result.ok == 2
         assert result.confirmed_skip == 0
 
     def test_csv_existing_user_declines(self, yt, playlist, add_file, tmp_path):
-        # ① プレイリスト既存なし ② CSV既存 → ユーザーが No → スキップ
         history = [{"video_id": "AAAAAAAAAAa", "playlist_id": "PL1", "action": "add"}]
         yt.playlistItems().insert().execute.return_value = {}
         csv_path = tmp_path / "history.csv"
@@ -98,17 +106,16 @@ class TestProcessAdd:
              patch("service.sync.fetch_playlist_video_ids", return_value=set()), \
              patch("service.sync.questionary.confirm") as mock_q:
             mock_q.return_value.ask.return_value = False
-            result = process_add(yt, playlist, history, add_file, csv_path)
+            result = process_add(yt, playlist, history, add_file, csv_path, tmp_path)
         assert result.confirmed_skip == 1
         assert result.ok == 1
 
     def test_409_fallback_collected(self, yt, playlist, add_file, tmp_path):
-        # 事前チェックをすり抜けて409（競合フォールバック）
         yt.playlistItems().insert().execute.side_effect = make_http_error(409)
         csv_path = tmp_path / "history.csv"
         with patch("service.sync.time.sleep"), \
              patch("service.sync.fetch_playlist_video_ids", return_value=set()):
-            result = process_add(yt, playlist, [], add_file, csv_path)
+            result = process_add(yt, playlist, [], add_file, csv_path, tmp_path)
         assert result.ok == 0
         assert len(result.already_in_playlist) == 2
 
@@ -117,9 +124,58 @@ class TestProcessAdd:
         csv_path = tmp_path / "history.csv"
         with patch("service.sync.time.sleep"), \
              patch("service.sync.fetch_playlist_video_ids", return_value=set()):
-            result = process_add(yt, playlist, [], add_file, csv_path)
+            result = process_add(yt, playlist, [], add_file, csv_path, tmp_path)
         assert result.ok == 0
         assert len(result.api_errors) == 2
+
+    def test_uses_cache_when_valid(self, yt, playlist, add_file, tmp_path):
+        write_cache(tmp_path, "PL1", [])
+        csv_path = tmp_path / "history.csv"
+        yt.playlistItems().insert().execute.return_value = {}
+        with patch("service.sync.time.sleep"), \
+             patch("service.sync.fetch_playlist_video_ids") as mock_fetch:
+            process_add(yt, playlist, [], add_file, csv_path, tmp_path)
+        mock_fetch.assert_not_called()
+
+    def test_fetches_api_when_cache_miss(self, yt, playlist, add_file, tmp_path):
+        csv_path = tmp_path / "history.csv"
+        yt.playlistItems().insert().execute.return_value = {}
+        with patch("service.sync.time.sleep"), \
+             patch("service.sync.fetch_playlist_video_ids", return_value=set()) as mock_fetch:
+            process_add(yt, playlist, [], add_file, csv_path, tmp_path)
+        mock_fetch.assert_called_once()
+
+    def test_saves_cache_after_api_fetch(self, yt, playlist, add_file, tmp_path):
+        csv_path = tmp_path / "history.csv"
+        yt.playlistItems().insert().execute.return_value = {}
+        with patch("service.sync.time.sleep"), \
+             patch("service.sync.fetch_playlist_video_ids", return_value=set()):
+            process_add(yt, playlist, [], add_file, csv_path, tmp_path)
+        assert (tmp_path / "playlist_cache_PL1.json").exists()
+
+    def test_updates_cache_after_successful_add(self, yt, playlist, add_file, tmp_path):
+        write_cache(tmp_path, "PL1", [])
+        csv_path = tmp_path / "history.csv"
+        yt.playlistItems().insert().execute.return_value = {}
+        with patch("service.sync.time.sleep"):
+            process_add(yt, playlist, [], add_file, csv_path, tmp_path)
+        data = json.loads((tmp_path / "playlist_cache_PL1.json").read_text())
+        assert "AAAAAAAAAAa" in data["video_ids"]
+        assert "BBBBBBBBBBb" in data["video_ids"]
+
+    def test_raises_quota_exceeded_on_fetch(self, yt, playlist, add_file, tmp_path):
+        csv_path = tmp_path / "history.csv"
+        with patch("service.sync.fetch_playlist_video_ids", side_effect=QuotaExceededError()), \
+             pytest.raises(QuotaExceededError):
+            process_add(yt, playlist, [], add_file, csv_path, tmp_path)
+
+    def test_raises_quota_exceeded_on_insert(self, yt, playlist, add_file, tmp_path):
+        write_cache(tmp_path, "PL1", [])
+        csv_path = tmp_path / "history.csv"
+        yt.playlistItems().insert().execute.side_effect = make_http_error(403, "quotaExceeded")
+        with patch("service.sync.time.sleep"), \
+             pytest.raises(QuotaExceededError):
+            process_add(yt, playlist, [], add_file, csv_path, tmp_path)
 
 
 class TestProcessRemove:
@@ -128,7 +184,7 @@ class TestProcessRemove:
         yt.playlistItems().delete().execute.return_value = {}
         csv_path = tmp_path / "history.csv"
         with patch("service.sync.time.sleep"):
-            result = process_remove(yt, playlist, remove_file, csv_path)
+            result = process_remove(yt, playlist, remove_file, csv_path, tmp_path)
         assert result.ok == 1
         assert result.not_found == []
         assert result.api_errors == []
@@ -137,19 +193,19 @@ class TestProcessRemove:
         f = tmp_path / "remove.txt"
         f.write_text("")
         csv_path = tmp_path / "history.csv"
-        result = process_remove(yt, playlist, f, csv_path)
+        result = process_remove(yt, playlist, f, csv_path, tmp_path)
         assert result.ok == 0
 
     def test_file_not_found(self, yt, playlist, tmp_path):
         csv_path = tmp_path / "history.csv"
-        result = process_remove(yt, playlist, tmp_path / "remove.txt", csv_path)
+        result = process_remove(yt, playlist, tmp_path / "remove.txt", csv_path, tmp_path)
         assert result.ok == 0
 
     def test_not_in_playlist_collected(self, yt, playlist, remove_file, tmp_path):
         yt.playlistItems().list().execute.return_value = {"items": []}
         csv_path = tmp_path / "history.csv"
         with patch("service.sync.time.sleep"):
-            result = process_remove(yt, playlist, remove_file, csv_path)
+            result = process_remove(yt, playlist, remove_file, csv_path, tmp_path)
         assert result.ok == 0
         assert len(result.not_found) == 1
 
@@ -157,5 +213,15 @@ class TestProcessRemove:
         yt.playlistItems().list().execute.side_effect = make_http_error(500)
         csv_path = tmp_path / "history.csv"
         with patch("service.sync.time.sleep"):
-            result = process_remove(yt, playlist, remove_file, csv_path)
+            result = process_remove(yt, playlist, remove_file, csv_path, tmp_path)
         assert len(result.api_errors) == 1
+
+    def test_updates_cache_after_successful_remove(self, yt, playlist, remove_file, tmp_path):
+        write_cache(tmp_path, "PL1", ["AAAAAAAAAAa"])
+        yt.playlistItems().list().execute.return_value = {"items": [{"id": "item_001"}]}
+        yt.playlistItems().delete().execute.return_value = {}
+        csv_path = tmp_path / "history.csv"
+        with patch("service.sync.time.sleep"):
+            process_remove(yt, playlist, remove_file, csv_path, tmp_path)
+        data = json.loads((tmp_path / "playlist_cache_PL1.json").read_text())
+        assert "AAAAAAAAAAa" not in data["video_ids"]
