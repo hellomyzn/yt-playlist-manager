@@ -25,8 +25,8 @@ services:
         source: ${PROJECT_DIR-./src}/
         target: ${WORKDIR-/opt/work}
       - type: bind
-        source: ../../footprints/youtube/playlist_history.csv
-        target: /data/youtube/playlist_history.csv
+        source: ../../footprints/youtube
+        target: /data/youtube
     networks:
       - internal_network
 
