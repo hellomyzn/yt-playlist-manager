@@ -52,7 +52,7 @@ def fetch_playlist_video_ids(youtube, playlist_id: str) -> set[str]:
         kwargs: dict = dict(part="snippet", playlistId=playlist_id, maxResults=50)
         if next_token:
             kwargs["pageToken"] = next_token
-        res = youtube.playlistItems().list(**kwargs).execute()
+        res = api_call_with_retry(lambda: youtube.playlistItems().list(**kwargs).execute())
         for item in res.get("items", []):
             ids.add(item["snippet"]["resourceId"]["videoId"])
         next_token = res.get("nextPageToken")

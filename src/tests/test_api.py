@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from googleapiclient.errors import HttpError
-from repository.youtube import QuotaExceededError, api_call_with_retry, api_add_video, api_remove_video
+from repository.youtube import QuotaExceededError, api_call_with_retry, api_add_video, api_remove_video, fetch_playlist_video_ids
 
 
 def make_http_error(status: int, reason: str = "") -> HttpError:
@@ -36,6 +36,19 @@ class TestApiCallWithRetry:
         fn = MagicMock(side_effect=make_http_error(500))
         with pytest.raises(HttpError):
             api_call_with_retry(fn)
+
+
+class TestFetchPlaylistVideoIds:
+    def test_raises_quota_exceeded_when_list_fails(self):
+        yt = MagicMock()
+        resp = MagicMock()
+        resp.status = 403
+        yt.playlistItems().list().execute.side_effect = HttpError(
+            resp=resp,
+            content=b'{"error":{"errors":[{"reason":"quotaExceeded"}]}}',
+        )
+        with pytest.raises(QuotaExceededError):
+            fetch_playlist_video_ids(yt, "PL1")
 
 
 class TestApiAddVideo:
